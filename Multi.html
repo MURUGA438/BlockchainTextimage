@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Decentralized Image & Text Storage</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; }
+    #imageDisplay, .stored-image { 
+      max-width: 400px; 
+      margin-top: 20px; 
+      display: block; 
+      border: 2px solid #ccc;
+      border-radius: 8px;
+      padding: 4px;
+    }
+    .stored-text {
+      margin-top: 10px;
+      padding: 10px;
+      border: 1px solid #aaa;
+      border-radius: 6px;
+      background: #f9f9f9;
+      max-width: 400px;
+      white-space: pre-wrap;
+    }
+    #walletAddress { margin-top: 10px; font-weight: bold; color: green; }
+  </style>
+</head>
+<body>
+  <h1>Decentralized Image & Text Storage</h1>
+
+  <!-- Connect MetaMask Wallet -->
+  <button id="connectWallet">Connect Wallet</button>
+  <div id="walletAddress"></div>
+  <br/><br/>
+
+  <!-- Image Upload Section -->
+  <h2>Upload Image</h2>
+  <input type="file" id="fileInput" accept="image/*">
+  <button id="uploadButton">Upload Image</button>
+  <br/><br/>
+
+  <!-- Text Upload Section -->
+  <h2>Store Text Message</h2>
+  <textarea id="textInput" rows="4" cols="50" placeholder="Enter your message here..."></textarea><br>
+  <button id="uploadTextButton">Upload Text</button>
+  <br/><br/>
+
+  <!-- View Previously Stored Items -->
+  <button id="viewImagesButton">View Stored Items</button>
+  <br/><br/>
+
+  <!-- Display Latest Uploaded Image -->
+  <h2>Latest Uploaded Image</h2>
+  <img id="imageDisplay" alt="Uploaded image will appear here">
+
+  <!-- Container for Previously Stored Data -->
+  <h2>Stored Images & Text</h2>
+  <div id="storedImages"></div>
+
+  <!-- Include web3.js from CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/web3@1.7.3/dist/web3.min.js"></script>
+
+  <script>
+    // === CONFIGURATION (your provided details) ===
+    const contractAddress = "0x1322c06d436654f34cf0d2d1b793cfcd8119759a";
+
+    const contractABI = [
+      {
+        "inputs": [{"internalType": "string", "name": "_cid", "type": "string"}],
+        "name": "uploadImage",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function"
+      },
+      {
+        "inputs": [{"internalType": "uint256", "name": "_id", "type": "uint256"}],
+        "name": "getImage",
+        "outputs": [{"internalType": "string", "name": "", "type": "string"}],
+        "stateMutability": "view",
+        "type": "function"
+      },
+      {
+        "inputs": [],
+        "name": "imageCount",
+        "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}],
+        "stateMutability": "view",
+        "type": "function"
+      }
+    ];
+
+    // ⚠️ For demo only — do NOT expose secrets in production!
+    const PINATA_API_KEY = "30d2d7cfbf6204b6ee0f";
+    const PINATA_SECRET = "699aef360df3d641ee180234b659f18b72c08e05fb1984ce1137bce12c30d20c";
+
+    let web3;
+    let userAccount;
+
+    // --- Wallet Connection ---
+    document.getElementById('connectWallet').addEventListener('click', async () => {
+      if (window.ethereum) {
+        try {
+          const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+          userAccount = accounts[0];
+          web3 = new Web3(window.ethereum);
+          document.getElementById("walletAddress").innerText = "Connected: " + userAccount;
+        } catch (error) {
+          console.error("User denied account access:", error);
+        }
+      } else {
+        alert('Please install MetaMask!');
+      }
+    });
+
+    // --- Upload file to IPFS via Pinata ---
+    async function uploadToIPFS(file) {
+      const formData = new FormData();
+      formData.append("file", file);
+
+      const response = await fetch("https://api.pinata.cloud/pinning/pinFileToIPFS", {
+        method: "POST",
+        headers: {
+          "pinata_api_key": PINATA_API_KEY,
+          "pinata_secret_api_key": PINATA_SECRET
+        },
+        body: formData
+      });
+
+      const data = await response.json();
+      if (data && data.IpfsHash) {
+        return data.IpfsHash;
+      } else {
+        throw new Error("IPFS upload failed");
+      }
+    }
+
+
+    // --- Upload text as JSON to IPFS via Pinata ---
+    async function uploadTextToIPFS(text) {
+      const body = JSON.stringify({ message: text });
+
+      const response = await fetch("https://api.pinata.cloud/pinning/pinJSONToIPFS", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "pinata_api_key": PINATA_API_KEY,
+          "pinata_secret_api_key": PINATA_SECRET
+        },
+        body: body
+      });
+
+      const data = await response.json();
+      if (data && data.IpfsHash) {
+        return data.IpfsHash;
+      } else {
+        throw new Error("IPFS text upload failed");
+      }
+    }
+
+    // --- Store CID on the Blockchain ---
+    async function storeCID(cid) {
+      const contract = new web3.eth.Contract(contractABI, contractAddress);
+      await contract.methods.uploadImage(cid).send({ from: userAccount });
+    }
+
+    // --- Handle Image Upload ---
+    document.getElementById('uploadButton').addEventListener('click', async () => {
+      const fileInput = document.getElementById('fileInput');
+      if (fileInput.files.length === 0) {
+        alert('Please select an image file');
+        return;
+      }
+      const file = fileInput.files[0];
+
+      try {
+        const cid = await uploadToIPFS(file);
+        await storeCID(cid);
+        document.getElementById('imageDisplay').src = `https://gateway.pinata.cloud/ipfs/${cid}`;
+        alert("Image stored successfully!");
+      } catch (error) {
+        console.error("Error during image upload:", error);
+        alert("Error uploading image.");
+      }
+    });
+
+    // --- Handle Text Upload ---
+    document.getElementById('uploadTextButton').addEventListener('click', async () => {
+      const text = document.getElementById('textInput').value.trim();
+      if (!text) {
+        alert("Please enter some text.");
+        return;
+      }
+
+      try {
+        const cid = await uploadTextToIPFS(text);
+        await storeCID(cid);
+        alert("Text stored successfully!");
+        document.getElementById('textInput').value = "";
+      } catch (error) {
+        console.error("Error during text upload:", error);
+        alert("Error uploading text.");
+      }
+    });
+
+    // --- Fetch and Display All Stored Items ---
+    document.getElementById('viewImagesButton').addEventListener('click', async () => {
+      if (!web3 || !userAccount) {
+        alert("Please connect your wallet first.");
+        return;
+      }
+      
+      const contract = new web3.eth.Contract(contractABI, contractAddress);
+      const imageCount = await contract.methods.imageCount().call();
+      
+      let storedImagesDiv = document.getElementById("storedImages");
+      storedImagesDiv.innerHTML = ""; // Clear previous items
+
+      for (let i = 0; i < imageCount; i++) {
+        const cid = await contract.methods.getImage(i).call();
+        const url = `https://gateway.pinata.cloud/ipfs/${cid}`;
+
+        // Try fetching to see if it’s JSON (text) or an image
+        try {
+          const res = await fetch(url);
+          const contentType = res.headers.get("content-type");
+
+          if (contentType.includes("application/json")) {
+            const json = await res.json();
+            let textDiv = document.createElement("div");
+            textDiv.classList.add("stored-text");
+            textDiv.innerText = json.message;
+            storedImagesDiv.appendChild(textDiv);
+          } else {
+            let imgElement = document.createElement("img");
+            imgElement.src = url;
+            imgElement.alt = Stored image ${i};
+            imgElement.classList.add("stored-image");
+            storedImagesDiv.appendChild(imgElement);
+          }
+        } catch (err) {
+          console.error("Error fetching CID:", cid, err);
+        }
+      }
+    });
+  </script>
+</body>
+</html>
